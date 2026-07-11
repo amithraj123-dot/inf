@@ -8,9 +8,14 @@ const view = ED.view;
 const world = ED.world;
 
 const canvas = document.getElementById('game');
-const ctx = canvas.getContext('2d');
+const mainCtx = canvas.getContext('2d');
+// All drawing helpers below read the module-level `ctx`. It normally points
+// at the main game canvas; drawCarIcon() swaps it to a garage preview canvas
+// for the duration of one synchronous draw, then swaps it back - this never
+// overlaps with the rAF render loop since both run on the same JS thread.
+let ctx = mainCtx;
 
-ED.render = { canvas, resizeCanvas, render };
+ED.render = { canvas, resizeCanvas, render, drawCarIcon };
 
 function resizeCanvas() {
   view.DPR = Math.min(window.devicePixelRatio || 1, 2);
@@ -20,8 +25,24 @@ function resizeCanvas() {
   canvas.height = view.H * view.DPR;
   canvas.style.width = view.W + 'px';
   canvas.style.height = view.H + 'px';
-  ctx.setTransform(view.DPR, 0, 0, view.DPR, 0, 0);
+  mainCtx.setTransform(view.DPR, 0, 0, view.DPR, 0, 0);
   view.layoutRoad();
+}
+
+/* Renders a single static car (garage preview) into its own small canvas,
+   using the exact same silhouette code the live game uses. */
+function drawCarIcon(targetCanvas, car) {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const cw = targetCanvas.clientWidth || 44, ch = targetCanvas.clientHeight || 64;
+  targetCanvas.width = cw * dpr;
+  targetCanvas.height = ch * dpr;
+  const prevCtx = ctx;
+  ctx = targetCanvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, cw, ch);
+  const carW = cw * 0.62, carH = ch * 0.86;
+  drawCar(cw / 2, (ch - carH) / 2, carW, carH, car.color, 0, true, null, car.shape);
+  ctx = prevCtx;
 }
 
 /* Blend between the previous and current environment palette. */
@@ -57,19 +78,93 @@ function drawWheels(w, h, isTruck) {
   }
 }
 
-function drawCar(x, y, w, h, color, tiltA, isPlayer, o) {
+/* ---------- Player car silhouettes ----------
+   Each garage car has a shape id (data.js) that gives it a distinct real-world
+   read: hatchback, coupe, sedan/cab, muscle car, supercar, hovercar. All are
+   drawn inside the same collision-box footprint (w x h); only decoration and
+   roofline vary, so gameplay geometry never changes with cosmetics. */
+function drawShapeDecor(shape, w, h, color) {
+  if (shape === 'coupe') {
+    // lower, wider greenhouse + a small lip spoiler
+    ctx.fillStyle = shade(color, -55);
+    roundRect(-w * 0.4, h * 0.86, w * 0.8, h * 0.05, 3);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    ctx.fillRect(-w * 0.07, h * 0.02, w * 0.14, h * 0.1);
+  } else if (shape === 'sedan') {
+    // taxi checker band across the roof
+    const bw = w * 0.68, bx = -bw / 2, by = h * 0.38, cell = bw / 6;
+    for (let i = 0; i < 6; i++) {
+      ctx.fillStyle = i % 2 ? '#0a0e1a' : '#f1f1f1';
+      ctx.fillRect(bx + i * cell, by, cell, h * 0.06);
+    }
+    ctx.fillStyle = '#fff9c4';
+    roundRect(-w * 0.1, h * 0.32, w * 0.2, h * 0.05, 2);
+    ctx.fill();
+  } else if (shape === 'muscle') {
+    // hood scoop + wide dark rear haunches
+    ctx.fillStyle = shade(color, -60);
+    roundRect(-w * 0.14, h * 0.02, w * 0.28, h * 0.1, 3);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(0,0,0,0.28)';
+    roundRect(-w * 0.52, h * 0.62, w * 0.14, h * 0.3, 4);
+    ctx.fill();
+    roundRect(w * 0.38, h * 0.62, w * 0.14, h * 0.3, 4);
+    ctx.fill();
+  } else if (shape === 'super') {
+    // wedge nose + rear wing on struts
+    ctx.fillStyle = shade(color, -35);
+    ctx.beginPath();
+    ctx.moveTo(-w * 0.3, h * 0.06);
+    ctx.lineTo(w * 0.3, h * 0.06);
+    ctx.lineTo(0, -h * 0.03);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = shade(color, -50);
+    ctx.fillRect(-w * 0.04, h * 0.9, w * 0.08, h * 0.08);
+    ctx.fillRect(w * 0.3, h * 0.86, w * 0.08, h * 0.12);
+    ctx.fillRect(-w * 0.38, h * 0.86, w * 0.08, h * 0.12);
+    ctx.fillRect(-w * 0.38, h * 0.82, w * 0.76, h * 0.045);
+    ctx.fillStyle = 'rgba(255,255,255,0.65)';
+    ctx.fillRect(-w * 0.42, h * 0.3, w * 0.06, h * 0.4);
+    ctx.fillRect(w * 0.36, h * 0.3, w * 0.06, h * 0.4);
+  } else if (shape === 'hover') {
+    // translucent panel seams instead of a hood/trunk split
+    ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(-w * 0.4, h * 0.32);
+    ctx.lineTo(w * 0.4, h * 0.32);
+    ctx.moveTo(-w * 0.4, h * 0.7);
+    ctx.lineTo(w * 0.4, h * 0.7);
+    ctx.stroke();
+  }
+}
+
+function drawCar(x, y, w, h, color, tiltA, isPlayer, o, shape) {
   const isTruck = o && o.type === 'truck';
+  const isHover = isPlayer && shape === 'hover';
   ctx.save();
   ctx.translate(x, y + h / 2);
   ctx.rotate(tiltA || 0);
   ctx.translate(0, -h / 2);
 
-  // ground shadow
-  ctx.fillStyle = 'rgba(0,0,0,0.4)';
-  roundRect(-w / 2 + 3, 6, w, h, w * 0.24);
-  ctx.fill();
+  // ground shadow (a soft glow disc for the hovercar instead of a hard shadow)
+  if (isHover) {
+    const glow = ctx.createRadialGradient(0, h * 0.55, 2, 0, h * 0.55, w * 0.6);
+    glow.addColorStop(0, 'rgba(6,255,165,0.55)');
+    glow.addColorStop(1, 'rgba(6,255,165,0)');
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.ellipse(0, h * 0.58, w * 0.6, h * 0.22, 0, 0, Math.PI * 2);
+    ctx.fill();
+  } else {
+    ctx.fillStyle = 'rgba(0,0,0,0.4)';
+    roundRect(-w / 2 + 3, 6, w, h, w * 0.24);
+    ctx.fill();
+  }
 
-  drawWheels(w, h, isTruck);
+  if (!isHover) drawWheels(w, h, isTruck);
 
   // body with side shading + dark outline for silhouette clarity
   const grad = ctx.createLinearGradient(-w / 2, 0, w / 2, 0);
@@ -125,6 +220,7 @@ function drawCar(x, y, w, h, color, tiltA, isPlayer, o) {
     ctx.fillStyle = '#fff9c4';
     ctx.fillRect(-w * 0.36, 1, w * 0.18, 4);
     ctx.fillRect(w * 0.18, 1, w * 0.18, 4);
+    if (shape) drawShapeDecor(shape, w, h, color);
   } else {
     ctx.fillStyle = '#ff5252';
     ctx.fillRect(-w * 0.36, h - 5, w * 0.18, 4);
@@ -352,7 +448,7 @@ function render() {
         ctx.stroke();
         ctx.restore();
       }
-      drawCar(p.x, p.y, p.w, p.h, car.color, p.tilt, true, null);
+      drawCar(p.x, p.y, p.w, p.h, car.color, p.tilt, true, null, car.shape);
     }
     if (world.magnetT > 0) {
       ctx.beginPath();

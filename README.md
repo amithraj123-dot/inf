@@ -25,7 +25,20 @@ Or enable **GitHub Pages** on this repo (Settings → Pages → Source: GitHub A
 - Dodge the traffic — one hit and it's over (unless you're holding a shield)
 - Each coin is worth **25 points** and goes into your bank
 - Squeeze past cars for **near-miss** bonuses (+10)
-- Spend banked coins in the **Garage** on six cars with different handling perks
+- Spend banked coins in the **Garage** on six real-world car archetypes, each with its own top speed, acceleration and handling
+
+## Garage roster
+
+Every car shares the same starting speed; top speed and acceleration change how the world-speed ramp climbs while you drive, and handling changes steering response. Stats shown are relative to the Hatch baseline.
+
+| Car | Archetype | Top Speed | Accel | Handling | Perk |
+|---|---|---|---|---|---|
+| Hatch | Everyday hatchback | +0% | +0% | +0% | Free starter |
+| Sport Coupe | Nimble corner-carver | +5% | +10% | +20% | Sharpest low-tier handling |
+| Taxi | Heavy sedan/cab | +5% | -10% | +0% | Wide coin pickup radius |
+| Muscle Car | Big-engine muscle | +15% | +35% | -15% | Fastest off the line, stiff to steer |
+| Supercar | Track-tuned exotic | +35% | +25% | +35% | Highest ceiling of any car |
+| Hovercar | Frictionless sci-fi | +30% | +15% | +40% | Glides straight over oil slicks |
 
 ## The road evolves as you drive
 

@@ -271,9 +271,19 @@ function buildGarage(focusCarId) {
     const btnClass = selected ? 'car-btn owned' : owned ? 'car-btn' : 'car-btn locked';
     const btnName = selected ? car.name + ' selected' : owned ? 'Select ' + car.name : 'Buy ' + car.name + ' for ' + car.price + ' coins';
     const canAfford = ED.save.bank >= car.price;
+    const statPct = m => Math.round((m - 1) * 100);
+    const statRow = (label, mult) => {
+      const pct = statPct(mult);
+      const pctLabel = (pct > 0 ? '+' : '') + pct + '%';
+      const barPct = ED.util.clamp(50 + pct, 6, 100);
+      return '<div class="stat-row"><span class="stat-label">' + label + '</span>' +
+        '<span class="stat-bar" aria-hidden="true"><span class="stat-fill" style="width:' + barPct + '%"></span></span>' +
+        '<span class="stat-val">' + pctLabel + '</span></div>';
+    };
     row.innerHTML =
-      '<div class="car-swatch" style="background: linear-gradient(160deg, ' + car.color + ', ' + ED.util.shade(car.color, -50) + ')"></div>' +
-      '<div class="car-info"><div class="car-name">' + car.name + '</div><div class="car-desc">' + car.desc + '</div></div>' +
+      '<canvas class="car-swatch" aria-hidden="true"></canvas>' +
+      '<div class="car-info"><div class="car-name">' + car.name + '</div><div class="car-desc">' + car.desc + '</div>' +
+      '<div class="car-stats">' + statRow('Top Speed', car.topSpeed) + statRow('Accel', car.accel) + statRow('Handling', car.steer) + '</div></div>' +
       '<button class="' + btnClass + '" aria-label="' + btnName + '" ' + ((!owned && !canAfford) || selected ? 'disabled' : '') + '>' + btnLabel + '</button>';
     const btn = row.querySelector('button');
     btn.addEventListener('click', () => {
@@ -295,6 +305,7 @@ function buildGarage(focusCarId) {
       requestAnimationFrame(() => target.focus({ preventScroll: true }));
     }
     list.appendChild(row);
+    ED.render.drawCarIcon(row.querySelector('.car-swatch'), car);
   }
 }
 $('garageBtn').addEventListener('click', () => { buildGarage(); ui.setState(STATE.GARAGE); showOverlay(garageOverlay); });
@@ -366,6 +377,7 @@ window.__ED = {
   get state() { return engine.state; },
   get score() { return engine.score(); },
   get distance() { return world.distance; },
+  get speedKmh() { return Math.round((world.speed * engine.timeScale() / D.PX_PER_M) * 3.6); },
   openLanes() { return world.lastOpenLanes.slice(); },
   snapshot() {
     return {

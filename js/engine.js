@@ -253,8 +253,11 @@ engine.update = function update(dt) {
   const p = world.player;
   world.paceT += dt;
 
-  // Speed: clean curve toward a real cap - tunable and honest
-  world.speed = Math.min(D.SPEED_CAP, D.BASE_SPEED + world.paceT * D.SPEED_RATE);
+  // Speed: clean curve toward a real cap, scaled by the selected car's own
+  // top speed and acceleration. All cars share the same starting speed, so
+  // the traffic fairness math (which is speed-relative, not constant-tied)
+  // still holds regardless of which car is driven.
+  world.speed = Math.min(D.SPEED_CAP * car.topSpeed, D.BASE_SPEED + world.paceT * D.SPEED_RATE * car.accel);
   world.distance += (eff * dt) / D.PX_PER_M;
 
   // Environment changes every ENV_EVERY_M metres

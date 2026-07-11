@@ -246,10 +246,16 @@ h2 {
   text-align: left;
 }
 .car-row.selected { border-color: var(--accent); background: rgba(255, 209, 102, 0.08); }
-.car-swatch { width: 30px; height: 48px; border-radius: 8px; flex-shrink: 0; box-shadow: 0 0 12px rgba(0,0,0,0.4) inset; }
+.car-swatch { width: 46px; height: 68px; flex-shrink: 0; display: block; }
 .car-info { flex: 1; min-width: 0; }
 .car-name { color: #fff; font-weight: 700; font-size: 15px; }
 .car-desc { color: #8b95b0; font-size: 12px; margin-top: 2px; }
+.car-stats { margin-top: 8px; display: flex; flex-direction: column; gap: 3px; }
+.stat-row { display: grid; grid-template-columns: 62px 1fr 34px; align-items: center; gap: 6px; }
+.stat-label { color: #8b95b0; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
+.stat-bar { display: block; height: 5px; border-radius: 3px; background: rgba(255,255,255,0.09); overflow: hidden; }
+.stat-fill { display: block; height: 100%; border-radius: 3px; background: linear-gradient(90deg, var(--accent-2), var(--accent)); }
+.stat-val { color: #cfd8ee; font-size: 10px; font-variant-numeric: tabular-nums; text-align: right; }
 .car-btn {
   border: none; border-radius: 30px;
   font-weight: 700; font-size: 13px;
@@ -258,6 +264,7 @@ h2 {
   background: linear-gradient(135deg, var(--accent-2), var(--accent));
   color: #0a0e1a;
   min-width: 86px;
+  align-self: center;
 }
 .car-btn.owned { background: rgba(255,255,255,0.1); color: #cfd8ee; }
 .car-btn.locked { background: rgba(255,209,102,0.16); color: #ffd166; }

@@ -28,13 +28,30 @@ ED.data = {
 
   TRAFFIC_COLORS: ['#e63946', '#f4a261', '#8ecae6', '#a8dadc', '#cdb4db', '#90be6d', '#f9c74f', '#ff7096'],
 
+  /* Each car is a distinct real-world archetype with its own top speed,
+     acceleration and handling multiplier (1.0 = baseline Hatch).
+     topSpeed scales how high the world-speed ramp is allowed to climb;
+     accel scales how fast it climbs there; steer is handling/control
+     response. shape drives the silhouette in render.js. */
   CARS: [
-    { id: 'hatch',  name: 'Hatch',    color: '#4facfe', price: 0,    steer: 1.0,  magnet: 0,  oilProof: false, desc: 'Balanced starter' },
-    { id: 'sport',  name: 'Sport',    color: '#ef476f', price: 150,  steer: 1.2,  magnet: 0,  oilProof: false, desc: '+20% steering response' },
-    { id: 'taxi',   name: 'Taxi',     color: '#ffd166', price: 400,  steer: 1.05, magnet: 34, oilProof: false, desc: 'Wider coin pickup' },
-    { id: 'muscle', name: 'Muscle',   color: '#f77f00', price: 700,  steer: 1.15, magnet: 16, oilProof: false, desc: 'Quick and grabby' },
-    { id: 'super',  name: 'Supercar', color: '#b465ff', price: 1200, steer: 1.35, magnet: 16, oilProof: false, desc: 'Razor-sharp steering' },
-    { id: 'hover',  name: 'Hover',    color: '#06ffa5', price: 2000, steer: 1.25, magnet: 50, oilProof: true,  desc: 'Glides over oil slicks' },
+    { id: 'hatch',  name: 'Hatch',      shape: 'hatch',  color: '#4facfe', price: 0,
+      topSpeed: 1.00, accel: 1.00, steer: 1.00, magnet: 0,  oilProof: false,
+      desc: 'Balanced everyday runabout' },
+    { id: 'sport',  name: 'Sport Coupe', shape: 'coupe',  color: '#ef476f', price: 150,
+      topSpeed: 1.05, accel: 1.10, steer: 1.20, magnet: 0,  oilProof: false,
+      desc: 'Nimble, tuned for corners' },
+    { id: 'taxi',   name: 'Taxi',       shape: 'sedan',  color: '#ffd166', price: 400,
+      topSpeed: 1.05, accel: 0.90, steer: 1.00, magnet: 34, oilProof: false,
+      desc: 'Heavy cruiser, wide coin pickup' },
+    { id: 'muscle', name: 'Muscle Car', shape: 'muscle', color: '#f77f00', price: 700,
+      topSpeed: 1.15, accel: 1.35, steer: 0.85, magnet: 0,  oilProof: false,
+      desc: 'Brutal acceleration, stiff handling' },
+    { id: 'super',  name: 'Supercar',   shape: 'super',  color: '#b465ff', price: 1200,
+      topSpeed: 1.35, accel: 1.25, steer: 1.35, magnet: 0,  oilProof: false,
+      desc: 'Elite in every stat' },
+    { id: 'hover',  name: 'Hovercar',   shape: 'hover',  color: '#06ffa5', price: 2000,
+      topSpeed: 1.30, accel: 1.15, steer: 1.40, magnet: 0,  oilProof: true,
+      desc: 'Frictionless drive, glides over oil' },
   ],
 
   /* Environments rotate every ENV_EVERY_M metres. Colors pre-parsed to [r,g,b]. */

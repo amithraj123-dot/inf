@@ -1,4 +1,4 @@
-const CACHE = 'endless-drive-v5';
+const CACHE = 'endless-drive-v6';
 const ASSETS = [
   '.',
   'index.html',
