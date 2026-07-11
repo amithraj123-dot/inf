@@ -1,0 +1,764 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0a0e1a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon.svg">
+<title>Endless Drive</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; user-select: none; -webkit-user-select: none; touch-action: none; }
+  html, body {
+    width: 100%; height: 100%;
+    overflow: hidden;
+    background: #0a0e1a;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    position: fixed;
+  }
+  #game {
+    display: block;
+    width: 100vw;
+    height: 100vh;
+    height: 100dvh;
+  }
+  .overlay {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: rgba(10, 14, 26, 0.88);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    z-index: 10;
+    padding: 24px;
+    text-align: center;
+    transition: opacity 0.3s ease;
+  }
+  .overlay.hidden { opacity: 0; pointer-events: none; }
+  h1 {
+    color: #fff;
+    font-size: clamp(32px, 9vw, 56px);
+    font-weight: 800;
+    letter-spacing: -1px;
+    margin-bottom: 8px;
+    background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .subtitle { color: #8b95b0; font-size: 16px; margin-bottom: 32px; }
+  .btn {
+    background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+    color: #0a0e1a;
+    border: none;
+    font-size: 20px;
+    font-weight: 700;
+    padding: 16px 56px;
+    border-radius: 50px;
+    cursor: pointer;
+    box-shadow: 0 8px 32px rgba(79, 172, 254, 0.4);
+    margin-bottom: 20px;
+  }
+  .btn:active { transform: scale(0.96); }
+  .hint { color: #5a6480; font-size: 13px; line-height: 1.7; max-width: 300px; }
+  .score-big { color: #fff; font-size: clamp(48px, 14vw, 88px); font-weight: 800; margin-bottom: 4px; }
+  .score-label { color: #8b95b0; font-size: 14px; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 12px; }
+  .best { color: #ffd166; font-size: 16px; font-weight: 600; margin-bottom: 32px; }
+  #hud {
+    position: fixed;
+    top: env(safe-area-inset-top, 12px);
+    left: 0; right: 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    padding: 14px 18px;
+    z-index: 5;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.3s;
+  }
+  #hud.visible { opacity: 1; }
+  .hud-item { text-align: left; }
+  .hud-item.right { text-align: right; }
+  .hud-value { color: #fff; font-size: 26px; font-weight: 800; text-shadow: 0 2px 8px rgba(0,0,0,0.6); font-variant-numeric: tabular-nums; }
+  .hud-label { color: rgba(255,255,255,0.55); font-size: 11px; text-transform: uppercase; letter-spacing: 1.5px; text-shadow: 0 1px 4px rgba(0,0,0,0.6); }
+  #pauseBtn {
+    position: fixed;
+    top: calc(env(safe-area-inset-top, 0px) + 12px);
+    left: 50%;
+    transform: translateX(-50%);
+    width: 40px; height: 40px;
+    border-radius: 50%;
+    border: none;
+    background: rgba(255,255,255,0.12);
+    color: #fff;
+    font-size: 16px;
+    z-index: 6;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+  }
+  #pauseBtn.visible { display: flex; }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="hud">
+  <div class="hud-item">
+    <div class="hud-value" id="scoreVal">0</div>
+    <div class="hud-label">Score</div>
+  </div>
+  <div class="hud-item right">
+    <div class="hud-value" id="speedVal">0</div>
+    <div class="hud-label">km/h</div>
+  </div>
+</div>
+<button id="pauseBtn" aria-label="Pause">❚❚</button>
+
+<div class="overlay" id="menuOverlay">
+  <h1>ENDLESS DRIVE</h1>
+  <p class="subtitle">How far can you go?</p>
+  <button class="btn" id="startBtn">DRIVE</button>
+  <p class="hint">Touch &amp; drag anywhere to steer.<br>Dodge traffic. Grab coins.<br>The road never ends — the speed never stops climbing.</p>
+</div>
+
+<div class="overlay hidden" id="gameOverOverlay">
+  <div class="score-label">You drove</div>
+  <div class="score-big" id="finalScore">0</div>
+  <div class="best" id="bestScore">Best: 0</div>
+  <button class="btn" id="restartBtn">DRIVE AGAIN</button>
+  <p class="hint">Crashed! But the road is still there, waiting…</p>
+</div>
+
+<div class="overlay hidden" id="pauseOverlay">
+  <h1 style="font-size: 36px;">PAUSED</h1>
+  <button class="btn" id="resumeBtn">RESUME</button>
+</div>
+
+<script>
+(() => {
+'use strict';
+
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+
+let W = 0, H = 0, DPR = 1;
+function resize() {
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  W = window.innerWidth;
+  H = window.innerHeight;
+  canvas.width = W * DPR;
+  canvas.height = H * DPR;
+  canvas.style.width = W + 'px';
+  canvas.style.height = H + 'px';
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+}
+window.addEventListener('resize', resize);
+window.addEventListener('orientationchange', () => setTimeout(resize, 100));
+resize();
+
+// ---------- Game state ----------
+const STATE = { MENU: 0, PLAYING: 1, PAUSED: 2, GAMEOVER: 3 };
+let state = STATE.MENU;
+
+const LANES = 3;
+let roadW, laneW, roadX;
+function layoutRoad() {
+  roadW = Math.min(W * 0.86, 480);
+  laneW = roadW / LANES;
+  roadX = (W - roadW) / 2;
+}
+layoutRoad();
+
+const player = {
+  x: 0,           // horizontal center in px
+  targetX: 0,
+  y: 0,
+  w: 0, h: 0,
+  tilt: 0,
+};
+
+let speed = 0;          // world scroll px/s
+let baseSpeed = 340;
+let maxSpeed = 1400;
+let distance = 0;       // meters
+let score = 0;
+let coinsCollected = 0;
+let best = parseInt(localStorage.getItem('endlessDriveBest') || '0', 10);
+
+let obstacles = [];     // traffic cars
+let coins = [];
+let particles = [];
+let stripes = [];       // road dashes
+let sceneryL = [], sceneryR = [];
+let spawnTimer = 0;
+let coinTimer = 0;
+let shakeT = 0, shakeMag = 0;
+let lastNearMiss = 0;
+let dayPhase = 0;       // cycles for sky color
+
+const CAR_COLORS = ['#e63946','#f4a261','#8ecae6','#a8dadc','#cdb4db','#90be6d','#f9c74f','#ff7096'];
+
+function playerDims() {
+  player.w = laneW * 0.62;
+  player.h = player.w * 1.85;
+  player.y = H - player.h - Math.max(H * 0.10, 70);
+}
+
+function initStripes() {
+  stripes = [];
+  const gap = 90;
+  for (let y = -gap; y < H + gap; y += gap) stripes.push(y);
+}
+
+function initScenery() {
+  sceneryL = []; sceneryR = [];
+  for (let i = 0; i < 8; i++) {
+    sceneryL.push({ y: Math.random() * H, s: 0.6 + Math.random() * 0.8 });
+    sceneryR.push({ y: Math.random() * H, s: 0.6 + Math.random() * 0.8 });
+  }
+}
+
+function reset() {
+  layoutRoad();
+  playerDims();
+  player.x = roadX + laneW * 1.5;
+  player.targetX = player.x;
+  player.tilt = 0;
+  speed = baseSpeed;
+  distance = 0;
+  score = 0;
+  coinsCollected = 0;
+  obstacles = [];
+  coins = [];
+  particles = [];
+  spawnTimer = 0.6;
+  coinTimer = 2.2;
+  shakeT = 0;
+  dayPhase = 0;
+  initStripes();
+  initScenery();
+}
+
+// ---------- Input: drag steering + optional tilt ----------
+let touching = false;
+let touchStartX = 0;
+let playerStartX = 0;
+
+function pointerDown(x) {
+  if (state !== STATE.PLAYING) return;
+  touching = true;
+  touchStartX = x;
+  playerStartX = player.targetX;
+}
+function pointerMove(x) {
+  if (!touching || state !== STATE.PLAYING) return;
+  const sensitivity = 1.6;
+  player.targetX = playerStartX + (x - touchStartX) * sensitivity;
+}
+function pointerUp() { touching = false; }
+
+canvas.addEventListener('touchstart', e => { e.preventDefault(); pointerDown(e.touches[0].clientX); }, { passive: false });
+canvas.addEventListener('touchmove',  e => { e.preventDefault(); pointerMove(e.touches[0].clientX); }, { passive: false });
+canvas.addEventListener('touchend',   e => { e.preventDefault(); pointerUp(); }, { passive: false });
+canvas.addEventListener('mousedown', e => pointerDown(e.clientX));
+canvas.addEventListener('mousemove', e => pointerMove(e.clientX));
+canvas.addEventListener('mouseup', pointerUp);
+
+// Keyboard fallback for desktop testing
+const keys = {};
+window.addEventListener('keydown', e => { keys[e.key] = true; });
+window.addEventListener('keyup',   e => { keys[e.key] = false; });
+
+// Device tilt steering (used when not touching)
+let tiltX = null;
+window.addEventListener('deviceorientation', e => {
+  if (e.gamma !== null) tiltX = e.gamma; // -90..90
+});
+
+// ---------- Audio (tiny synth, no assets) ----------
+let audioCtx = null;
+function ensureAudio() {
+  if (!audioCtx) {
+    try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {}
+  }
+  if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+}
+function beep(freq, dur, type, vol) {
+  if (!audioCtx) return;
+  const o = audioCtx.createOscillator();
+  const g = audioCtx.createGain();
+  o.type = type || 'square';
+  o.frequency.value = freq;
+  g.gain.setValueAtTime(vol || 0.08, audioCtx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + dur);
+  o.connect(g).connect(audioCtx.destination);
+  o.start();
+  o.stop(audioCtx.currentTime + dur);
+}
+const sfxCoin  = () => { beep(880, 0.08, 'sine', 0.1); setTimeout(() => beep(1320, 0.1, 'sine', 0.08), 60); };
+const sfxCrash = () => { beep(90, 0.4, 'sawtooth', 0.2); beep(60, 0.5, 'square', 0.15); };
+const sfxNear  = () => beep(500, 0.05, 'triangle', 0.05);
+
+function vibrate(ms) { if (navigator.vibrate) navigator.vibrate(ms); }
+
+// ---------- Spawning ----------
+function spawnObstacle() {
+  const lane = Math.floor(Math.random() * LANES);
+  const w = laneW * 0.62;
+  const h = w * 1.85;
+  const x = roadX + laneW * (lane + 0.5);
+  // Don't stack on an existing car in the same lane near the top
+  for (const o of obstacles) {
+    if (o.lane === lane && o.y < h * 2.5) return;
+  }
+  // Ensure at least one lane stays passable in this "row"
+  const rowCars = obstacles.filter(o => o.y < h * 1.5).length;
+  if (rowCars >= LANES - 1) return;
+  obstacles.push({
+    x, y: -h - 20, w, h, lane,
+    color: CAR_COLORS[Math.floor(Math.random() * CAR_COLORS.length)],
+    vy: speed * (0.35 + Math.random() * 0.25), // traffic moves slower than world
+    passed: false,
+  });
+}
+
+function spawnCoinRun() {
+  const lane = Math.floor(Math.random() * LANES);
+  const x = roadX + laneW * (lane + 0.5);
+  const n = 3 + Math.floor(Math.random() * 3);
+  for (let i = 0; i < n; i++) {
+    coins.push({ x, y: -30 - i * 70, r: Math.min(laneW * 0.16, 16), spin: Math.random() * Math.PI });
+  }
+}
+
+function addParticles(x, y, color, n, force) {
+  for (let i = 0; i < n; i++) {
+    const a = Math.random() * Math.PI * 2;
+    const v = (0.3 + Math.random() * 0.7) * (force || 200);
+    particles.push({
+      x, y,
+      vx: Math.cos(a) * v,
+      vy: Math.sin(a) * v,
+      life: 0.4 + Math.random() * 0.5,
+      maxLife: 0.9,
+      color,
+      size: 2 + Math.random() * 4,
+    });
+  }
+}
+
+// ---------- Update ----------
+function update(dt) {
+  dayPhase += dt * 0.012;
+
+  // Speed ramps up forever (asymptotically toward maxSpeed, then maxSpeed slowly grows too — truly endless)
+  maxSpeed += dt * 2;
+  speed += (maxSpeed - speed) * 0.008 * dt * 60 * 0.06;
+  speed += dt * 6;
+
+  distance += (speed * dt) / 12; // rough meters
+  score = Math.floor(distance) + coinsCollected * 25;
+
+  // Steering
+  if (!touching) {
+    if (keys['ArrowLeft'] || keys['a'])  player.targetX -= 520 * dt;
+    if (keys['ArrowRight'] || keys['d']) player.targetX += 520 * dt;
+    if (tiltX !== null && !keys['ArrowLeft'] && !keys['ArrowRight'] && !keys['a'] && !keys['d']) {
+      const dead = 3;
+      if (Math.abs(tiltX) > dead) player.targetX += (tiltX - Math.sign(tiltX) * dead) * 14 * dt * 4;
+    }
+  }
+  const minX = roadX + player.w / 2 + 6;
+  const maxX = roadX + roadW - player.w / 2 - 6;
+  player.targetX = Math.max(minX, Math.min(maxX, player.targetX));
+  const prevX = player.x;
+  player.x += (player.targetX - player.x) * Math.min(1, 14 * dt);
+  player.tilt = Math.max(-0.28, Math.min(0.28, (player.x - prevX) * 0.045));
+
+  // Road stripes scroll
+  const gap = 90;
+  for (let i = 0; i < stripes.length; i++) {
+    stripes[i] += speed * dt;
+    if (stripes[i] > H + gap) stripes[i] -= (Math.ceil((H + 2 * gap) / gap)) * gap;
+  }
+  // Scenery scroll (parallax)
+  for (const arr of [sceneryL, sceneryR]) {
+    for (const s of arr) {
+      s.y += speed * dt * 0.85;
+      if (s.y > H + 60) { s.y = -60 - Math.random() * 100; s.s = 0.6 + Math.random() * 0.8; }
+    }
+  }
+
+  // Spawn traffic — interval shrinks as speed grows
+  spawnTimer -= dt;
+  if (spawnTimer <= 0) {
+    spawnObstacle();
+    const speedFactor = speed / baseSpeed;
+    spawnTimer = Math.max(0.28, 1.1 / Math.sqrt(speedFactor)) * (0.7 + Math.random() * 0.6);
+  }
+  coinTimer -= dt;
+  if (coinTimer <= 0) {
+    spawnCoinRun();
+    coinTimer = 2.5 + Math.random() * 3;
+  }
+
+  // Move obstacles, collision, near-miss
+  const px = player.x, py = player.y + player.h / 2;
+  const pw = player.w * 0.82, ph = player.h * 0.9;
+  for (let i = obstacles.length - 1; i >= 0; i--) {
+    const o = obstacles[i];
+    o.y += (speed - o.vy) * dt;
+    if (o.y > H + o.h) { obstacles.splice(i, 1); continue; }
+    const dx = Math.abs(o.x - px);
+    const dy = Math.abs((o.y + o.h / 2) - py);
+    if (dx < (pw + o.w * 0.82) / 2 && dy < (ph + o.h * 0.9) / 2) {
+      crash(o);
+      return;
+    }
+    // Near miss bonus
+    if (!o.passed && o.y + o.h / 2 > py) {
+      o.passed = true;
+      if (dx < (pw + o.w) / 2 + laneW * 0.22) {
+        score += 10;
+        coinsCollected += 0; // near-miss adds straight to score via distance illusion
+        distance += 10 * 12 / 12;
+        lastNearMiss = performance.now();
+        sfxNear();
+        vibrate(10);
+      }
+    }
+  }
+
+  // Coins
+  for (let i = coins.length - 1; i >= 0; i--) {
+    const c = coins[i];
+    c.y += speed * dt;
+    c.spin += dt * 6;
+    if (c.y > H + 40) { coins.splice(i, 1); continue; }
+    const dx = c.x - px, dy = c.y - py;
+    if (dx * dx + dy * dy < Math.pow(c.r + pw / 2, 2)) {
+      coins.splice(i, 1);
+      coinsCollected++;
+      addParticles(c.x, c.y, '#ffd166', 8, 160);
+      sfxCoin();
+      vibrate(15);
+    }
+  }
+
+  // Particles
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x += p.vx * dt;
+    p.y += p.vy * dt + speed * dt * 0.5;
+    p.life -= dt;
+    if (p.life <= 0) particles.splice(i, 1);
+  }
+
+  if (shakeT > 0) shakeT -= dt;
+
+  // HUD
+  scoreVal.textContent = score.toLocaleString();
+  speedVal.textContent = Math.floor(speed / 4.2);
+}
+
+function crash(o) {
+  addParticles(player.x, player.y + player.h / 2, '#ff6b35', 30, 320);
+  addParticles(player.x, player.y + player.h / 2, '#ffd166', 20, 260);
+  if (o) addParticles(o.x, o.y + o.h / 2, o.color, 16, 240);
+  shakeT = 0.5; shakeMag = 14;
+  sfxCrash();
+  vibrate([60, 40, 80]);
+  state = STATE.GAMEOVER;
+  if (score > best) {
+    best = score;
+    localStorage.setItem('endlessDriveBest', String(best));
+  }
+  finalScore.textContent = score.toLocaleString();
+  bestScore.textContent = 'Best: ' + best.toLocaleString();
+  setTimeout(() => {
+    gameOverOverlay.classList.remove('hidden');
+    hud.classList.remove('visible');
+    pauseBtn.classList.remove('visible');
+  }, 550);
+}
+
+// ---------- Render ----------
+function skyColors() {
+  // Slow endless day/night cycle
+  const t = (Math.sin(dayPhase) + 1) / 2; // 0 night → 1 day
+  const lerp = (a, b) => Math.round(a + (b - a) * t);
+  const top = `rgb(${lerp(8, 40)}, ${lerp(10, 90)}, ${lerp(26, 160)})`;
+  const bot = `rgb(${lerp(16, 90)}, ${lerp(20, 140)}, ${lerp(40, 200)})`;
+  return [top, bot, t];
+}
+
+function drawCar(x, y, w, h, color, tilt, isPlayer) {
+  ctx.save();
+  ctx.translate(x, y + h / 2);
+  ctx.rotate(tilt || 0);
+  ctx.translate(0, -h / 2);
+
+  // shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.35)';
+  roundRect(-w / 2 + 3, 6, w, h, w * 0.24);
+  ctx.fill();
+
+  // body
+  const grad = ctx.createLinearGradient(-w / 2, 0, w / 2, 0);
+  grad.addColorStop(0, shade(color, -25));
+  grad.addColorStop(0.5, color);
+  grad.addColorStop(1, shade(color, -25));
+  ctx.fillStyle = grad;
+  roundRect(-w / 2, 0, w, h, w * 0.24);
+  ctx.fill();
+
+  // windshield + rear glass
+  ctx.fillStyle = 'rgba(15, 25, 45, 0.85)';
+  roundRect(-w * 0.34, h * 0.16, w * 0.68, h * 0.2, w * 0.1);
+  ctx.fill();
+  roundRect(-w * 0.34, h * 0.66, w * 0.68, h * 0.16, w * 0.1);
+  ctx.fill();
+
+  // racing stripe for player
+  if (isPlayer) {
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    ctx.fillRect(-w * 0.07, h * 0.02, w * 0.14, h * 0.13);
+    ctx.fillRect(-w * 0.07, h * 0.4, w * 0.14, h * 0.24);
+    ctx.fillRect(-w * 0.07, h * 0.85, w * 0.14, h * 0.12);
+  }
+
+  // lights
+  if (isPlayer) {
+    ctx.fillStyle = '#fff9c4';
+    ctx.fillRect(-w * 0.36, 1, w * 0.18, 4);
+    ctx.fillRect(w * 0.18, 1, w * 0.18, 4);
+  } else {
+    ctx.fillStyle = '#ff5252';
+    ctx.fillRect(-w * 0.36, h - 5, w * 0.18, 4);
+    ctx.fillRect(w * 0.18, h - 5, w * 0.18, 4);
+  }
+  ctx.restore();
+}
+
+function roundRect(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+function shade(hex, amt) {
+  const n = parseInt(hex.slice(1), 16);
+  let r = (n >> 16) + amt, g = ((n >> 8) & 0xff) + amt, b = (n & 0xff) + amt;
+  r = Math.max(0, Math.min(255, r)); g = Math.max(0, Math.min(255, g)); b = Math.max(0, Math.min(255, b));
+  return `rgb(${r},${g},${b})`;
+}
+
+function render() {
+  ctx.save();
+  if (shakeT > 0) {
+    const m = shakeMag * (shakeT / 0.5);
+    ctx.translate((Math.random() - 0.5) * m, (Math.random() - 0.5) * m);
+  }
+
+  // sky / offroad
+  const [top, bot, dayT] = skyColors();
+  const bg = ctx.createLinearGradient(0, 0, 0, H);
+  bg.addColorStop(0, top);
+  bg.addColorStop(1, bot);
+  ctx.fillStyle = bg;
+  ctx.fillRect(-20, -20, W + 40, H + 40);
+
+  // grass strips
+  const grassDark = dayT > 0.5 ? '#2d6a4f' : '#12291f';
+  ctx.fillStyle = grassDark;
+  ctx.fillRect(-20, -20, roadX + 20, H + 40);
+  ctx.fillRect(roadX + roadW, -20, W - roadX - roadW + 20, H + 40);
+
+  // scenery (trees)
+  const treeCol = dayT > 0.5 ? '#40916c' : '#1b4332';
+  for (const s of sceneryL) drawTree(roadX * 0.5, s.y, 22 * s.s, treeCol);
+  for (const s of sceneryR) drawTree(roadX + roadW + (W - roadX - roadW) * 0.5, s.y, 22 * s.s, treeCol);
+
+  // road
+  ctx.fillStyle = dayT > 0.5 ? '#3a3f4b' : '#22252e';
+  ctx.fillRect(roadX, -20, roadW, H + 40);
+
+  // road edges
+  ctx.fillStyle = '#f1f1f1';
+  ctx.fillRect(roadX, -20, 5, H + 40);
+  ctx.fillRect(roadX + roadW - 5, -20, 5, H + 40);
+
+  // lane stripes
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.75)';
+  const dashH = 42;
+  for (let l = 1; l < LANES; l++) {
+    const lx = roadX + laneW * l - 3;
+    for (const sy of stripes) {
+      ctx.fillRect(lx, sy, 6, dashH);
+    }
+  }
+
+  // coins
+  for (const c of coins) {
+    const squeeze = Math.abs(Math.cos(c.spin));
+    ctx.save();
+    ctx.translate(c.x, c.y);
+    ctx.scale(squeeze, 1);
+    ctx.beginPath();
+    ctx.arc(0, 0, c.r, 0, Math.PI * 2);
+    ctx.fillStyle = '#ffd166';
+    ctx.fill();
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = '#e09f3e';
+    ctx.stroke();
+    ctx.fillStyle = '#e09f3e';
+    ctx.font = `bold ${c.r * 1.1}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('$', 0, 1);
+    ctx.restore();
+  }
+
+  // traffic
+  for (const o of obstacles) drawCar(o.x, o.y, o.w, o.h, o.color, 0, false);
+
+  // player
+  if (state !== STATE.MENU) {
+    drawCar(player.x, player.y, player.w, player.h, '#4facfe', player.tilt, true);
+  }
+
+  // particles
+  for (const p of particles) {
+    ctx.globalAlpha = Math.max(0, p.life / p.maxLife);
+    ctx.fillStyle = p.color;
+    ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
+  }
+  ctx.globalAlpha = 1;
+
+  // near-miss flash text
+  if (performance.now() - lastNearMiss < 700 && state === STATE.PLAYING) {
+    const a = 1 - (performance.now() - lastNearMiss) / 700;
+    ctx.globalAlpha = a;
+    ctx.fillStyle = '#ffd166';
+    ctx.font = 'bold 22px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('NEAR MISS +10', player.x, player.y - 18);
+    ctx.globalAlpha = 1;
+  }
+
+  // speed lines at high velocity
+  if (speed > 700 && state === STATE.PLAYING) {
+    const intensity = Math.min(1, (speed - 700) / 500);
+    ctx.strokeStyle = `rgba(255,255,255,${0.12 * intensity})`;
+    ctx.lineWidth = 2;
+    for (let i = 0; i < 8; i++) {
+      const lx = (i * 97 + (performance.now() * 0.7 * (1 + i * 0.13)) % (H + 120)) % W;
+      const ly = ((performance.now() * (0.9 + i * 0.11)) % (H + 120)) - 60;
+      ctx.beginPath();
+      ctx.moveTo(lx, ly);
+      ctx.lineTo(lx, ly + 50 + intensity * 60);
+      ctx.stroke();
+    }
+  }
+
+  ctx.restore();
+}
+
+function drawTree(x, y, r, color) {
+  ctx.fillStyle = '#5c4033';
+  ctx.fillRect(x - 3, y, 6, r * 0.9);
+  ctx.beginPath();
+  ctx.arc(x, y - r * 0.2, r, 0, Math.PI * 2);
+  ctx.fillStyle = color;
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(x - r * 0.5, y + r * 0.25, r * 0.7, 0, Math.PI * 2);
+  ctx.arc(x + r * 0.5, y + r * 0.25, r * 0.7, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+// ---------- Loop ----------
+let lastT = 0;
+function loop(t) {
+  requestAnimationFrame(loop);
+  const dt = Math.min((t - lastT) / 1000, 0.05);
+  lastT = t;
+  if (state === STATE.PLAYING) update(dt);
+  render();
+}
+requestAnimationFrame(loop);
+
+// ---------- UI wiring ----------
+const menuOverlay = document.getElementById('menuOverlay');
+const gameOverOverlay = document.getElementById('gameOverOverlay');
+const pauseOverlay = document.getElementById('pauseOverlay');
+const hud = document.getElementById('hud');
+const scoreVal = document.getElementById('scoreVal');
+const speedVal = document.getElementById('speedVal');
+const finalScore = document.getElementById('finalScore');
+const bestScore = document.getElementById('bestScore');
+const pauseBtn = document.getElementById('pauseBtn');
+
+function startGame() {
+  ensureAudio();
+  // Ask for tilt permission on iOS (optional — drag works regardless)
+  if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+    DeviceOrientationEvent.requestPermission().catch(() => {});
+  }
+  reset();
+  state = STATE.PLAYING;
+  menuOverlay.classList.add('hidden');
+  gameOverOverlay.classList.add('hidden');
+  hud.classList.add('visible');
+  pauseBtn.classList.add('visible');
+}
+
+document.getElementById('startBtn').addEventListener('click', startGame);
+document.getElementById('restartBtn').addEventListener('click', startGame);
+
+pauseBtn.addEventListener('click', () => {
+  if (state === STATE.PLAYING) {
+    state = STATE.PAUSED;
+    pauseOverlay.classList.remove('hidden');
+  }
+});
+document.getElementById('resumeBtn').addEventListener('click', () => {
+  if (state === STATE.PAUSED) {
+    state = STATE.PLAYING;
+    pauseOverlay.classList.add('hidden');
+    lastT = performance.now();
+  }
+});
+
+// Auto-pause when app goes to background
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && state === STATE.PLAYING) {
+    state = STATE.PAUSED;
+    pauseOverlay.classList.remove('hidden');
+  }
+});
+
+// Service worker for offline play
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  });
+}
+})();
+</script>
+</body>
+</html>

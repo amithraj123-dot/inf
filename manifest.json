@@ -1,0 +1,18 @@
+{
+  "name": "Endless Drive",
+  "short_name": "Drive",
+  "description": "A never-ending mobile driving game. Dodge traffic, grab coins, go forever.",
+  "start_url": ".",
+  "display": "fullscreen",
+  "orientation": "portrait",
+  "background_color": "#0a0e1a",
+  "theme_color": "#0a0e1a",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
