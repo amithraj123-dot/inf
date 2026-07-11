@@ -1,4 +1,4 @@
-const CACHE = 'endless-drive-v2';
+const CACHE = 'endless-drive-v3';
 const ASSETS = ['.', 'index.html', 'manifest.json', 'icon.svg', 'sw.js'];
 
 self.addEventListener('install', e => {
