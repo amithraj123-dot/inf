@@ -1,5 +1,20 @@
-const CACHE = 'endless-drive-v3';
-const ASSETS = ['.', 'index.html', 'manifest.json', 'icon.svg', 'sw.js'];
+const CACHE = 'endless-drive-v5';
+const ASSETS = [
+  '.',
+  'index.html',
+  'css/style.css',
+  'js/data.js',
+  'js/save.js',
+  'js/audio.js',
+  'js/engine.js',
+  'js/render.js',
+  'js/ui.js',
+  'manifest.json',
+  'icon.svg',
+  'icon-maskable.svg',
+  'icon-180.png',
+  'sw.js',
+];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting()));

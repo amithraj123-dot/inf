@@ -62,6 +62,27 @@ Traffic is generated as patterned rows, not random cars:
 - 📴 Installable PWA with offline play via service worker
 - ⚡ Single dependency-free HTML file, 60 fps canvas rendering with swept collision detection
 
+## Accessibility
+
+- Fully keyboard-operable: focus follows each screen, Enter/Space activate the focused control, Escape backs out of any screen
+- Screen-reader support: described canvas, live announcements for state changes, milestones, hazards, and results
+- Pinch-zoom is never blocked outside the play surface; WCAG AA text contrast
+- Reduced-motion mode (own toggle, seeded from and responsive to the OS preference)
+
 ## Tech
 
 Plain HTML5 canvas + vanilla JavaScript. No frameworks, no build step, no assets to load.
+
+```
+index.html        markup + script/style includes (encoding-proof: pure ASCII, symbols as entities)
+css/style.css     all styling; per-screen visual identities via CSS custom properties
+js/data.js        tuning constants, car catalogue, environment palettes
+js/save.js        localStorage persistence
+js/audio.js       zero-asset synth SFX, engine tone, haptics
+js/engine.js      simulation: traffic patterns, collision, power-ups, scoring
+js/render.js      all canvas drawing
+js/ui.js          overlays, input, state machine, main loop, accessibility
+sw.js             offline cache (PWA)
+```
+
+Classic scripts (no ES modules), so the game still runs when `index.html` is opened directly from disk.
