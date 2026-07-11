@@ -128,7 +128,7 @@
   <h1>ENDLESS DRIVE</h1>
   <p class="subtitle">How far can you go?</p>
   <button class="btn" id="startBtn">DRIVE</button>
-  <p class="hint">Touch &amp; drag anywhere to steer.<br>Dodge traffic. Grab coins.<br>The road never ends — the speed never stops climbing.</p>
+  <p class="hint" id="menuHint">Touch &amp; drag anywhere to steer.<br>Dodge traffic. Grab coins.<br>The road never ends — the speed never stops climbing.</p>
 </div>
 
 <div class="overlay hidden" id="gameOverOverlay">
@@ -271,13 +271,27 @@ canvas.addEventListener('touchstart', e => { e.preventDefault(); pointerDown(e.t
 canvas.addEventListener('touchmove',  e => { e.preventDefault(); pointerMove(e.touches[0].clientX); }, { passive: false });
 canvas.addEventListener('touchend',   e => { e.preventDefault(); pointerUp(); }, { passive: false });
 canvas.addEventListener('mousedown', e => pointerDown(e.clientX));
-canvas.addEventListener('mousemove', e => pointerMove(e.clientX));
-canvas.addEventListener('mouseup', pointerUp);
+// Window-level so a drag released outside the canvas doesn't stick
+window.addEventListener('mousemove', e => pointerMove(e.clientX));
+window.addEventListener('mouseup', pointerUp);
+window.addEventListener('blur', pointerUp);
 
-// Keyboard fallback for desktop testing
+// Keyboard controls for laptop/desktop
 const keys = {};
-window.addEventListener('keydown', e => { keys[e.key] = true; });
-window.addEventListener('keyup',   e => { keys[e.key] = false; });
+window.addEventListener('keydown', e => {
+  if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', ' '].includes(e.key)) e.preventDefault();
+  keys[e.key] = true;
+  if (e.repeat) return;
+  if (e.key === 'Enter' || e.key === ' ') {
+    if (state === STATE.MENU || state === STATE.GAMEOVER) startGame();
+    else if (state === STATE.PAUSED) resumeGame();
+  }
+  if (e.key === 'Escape' || e.key === 'p' || e.key === 'P') {
+    if (state === STATE.PLAYING) pauseGame();
+    else if (state === STATE.PAUSED) resumeGame();
+  }
+});
+window.addEventListener('keyup', e => { keys[e.key] = false; });
 
 // Device tilt steering (used when not touching)
 let tiltX = null;
@@ -730,27 +744,33 @@ function startGame() {
 document.getElementById('startBtn').addEventListener('click', startGame);
 document.getElementById('restartBtn').addEventListener('click', startGame);
 
-pauseBtn.addEventListener('click', () => {
-  if (state === STATE.PLAYING) {
-    state = STATE.PAUSED;
-    pauseOverlay.classList.remove('hidden');
-  }
-});
-document.getElementById('resumeBtn').addEventListener('click', () => {
-  if (state === STATE.PAUSED) {
-    state = STATE.PLAYING;
-    pauseOverlay.classList.add('hidden');
-    lastT = performance.now();
-  }
+function pauseGame() {
+  if (state !== STATE.PLAYING) return;
+  state = STATE.PAUSED;
+  pauseOverlay.classList.remove('hidden');
+}
+function resumeGame() {
+  if (state !== STATE.PAUSED) return;
+  state = STATE.PLAYING;
+  pauseOverlay.classList.add('hidden');
+  lastT = performance.now();
+}
+
+pauseBtn.addEventListener('click', pauseGame);
+document.getElementById('resumeBtn').addEventListener('click', resumeGame);
+
+// Auto-pause when app/tab goes to background
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) pauseGame();
 });
 
-// Auto-pause when app goes to background
-document.addEventListener('visibilitychange', () => {
-  if (document.hidden && state === STATE.PLAYING) {
-    state = STATE.PAUSED;
-    pauseOverlay.classList.remove('hidden');
-  }
-});
+// Show laptop controls in the menu when there's no touchscreen
+if (!('ontouchstart' in window) && navigator.maxTouchPoints === 0) {
+  document.getElementById('menuHint').innerHTML =
+    'Steer with <b>&larr; &rarr;</b> arrow keys (or A/D), or drag with the mouse.<br>' +
+    '<b>Enter</b>&thinsp;/&thinsp;<b>Space</b> to start &middot; <b>P</b> or <b>Esc</b> to pause.<br>' +
+    'Dodge traffic. Grab coins. The road never ends.';
+}
 
 // Service worker for offline play
 if ('serviceWorker' in navigator) {

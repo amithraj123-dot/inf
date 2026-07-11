@@ -16,7 +16,10 @@ Or enable **GitHub Pages** on this repo (Settings → Pages → deploy from bran
 
 ## How to play
 
-- **Touch & drag** anywhere to steer (or tilt your phone, or arrow keys on desktop)
+**On a phone:** touch & drag anywhere to steer (or tilt the device).
+
+**On a laptop/desktop:** steer with **← →** arrow keys or **A/D**, or drag with the mouse. **Enter**/**Space** starts or restarts, **P** or **Esc** pauses.
+
 - Dodge the traffic — one hit and it's over
 - Grab **coins** for +25 points each
 - Squeeze past cars for **near-miss** bonuses (+10)
