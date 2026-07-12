@@ -15,7 +15,7 @@ const mainCtx = canvas.getContext('2d');
 // overlaps with the rAF render loop since both run on the same JS thread.
 let ctx = mainCtx;
 
-ED.render = { canvas, resizeCanvas, render, drawCarIcon };
+ED.render = { canvas, resizeCanvas, render, drawCarIcon, drawWheel };
 
 function resizeCanvas() {
   view.DPR = Math.min(window.devicePixelRatio || 1, 2);
@@ -45,6 +45,70 @@ function drawCarIcon(targetCanvas, car) {
   ctx = prevCtx;
 }
 
+/* Renders the spin-the-wheel challenge selector. rotationDeg is the current
+   animated rotation (0 at rest, wound up by ui.js's ease-out spin); slice 0
+   is centred at the top when rotationDeg is 0, matching the alignment math
+   in ui.js's triggerWheel(). */
+function drawWheel(targetCanvas, rotationDeg, challenges) {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const cw = targetCanvas.clientWidth || 260, chh = targetCanvas.clientHeight || 260;
+  targetCanvas.width = cw * dpr;
+  targetCanvas.height = chh * dpr;
+  const prevCtx = ctx;
+  ctx = targetCanvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, cw, chh);
+
+  const cx = cw / 2, cy = chh / 2, r = Math.min(cw, chh) / 2 - 4;
+  const n = challenges.length;
+  const segRad = (Math.PI * 2) / n;
+
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.shadowColor = 'rgba(0,0,0,0.5)';
+  ctx.shadowBlur = 10;
+  ctx.beginPath();
+  ctx.arc(0, 0, r, 0, Math.PI * 2);
+  ctx.fillStyle = '#0a0e1a';
+  ctx.fill();
+  ctx.shadowBlur = 0;
+
+  ctx.rotate((rotationDeg * Math.PI) / 180);
+  for (let i = 0; i < n; i++) {
+    const startA = -Math.PI / 2 + i * segRad;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.arc(0, 0, r - 3, startA, startA + segRad);
+    ctx.closePath();
+    ctx.fillStyle = challenges[i].color;
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(10,14,26,0.55)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    ctx.save();
+    ctx.rotate(startA + segRad / 2);
+    ctx.translate(r * 0.6, 0);
+    ctx.fillStyle = '#0a0e1a';
+    ctx.font = 'bold ' + Math.max(9, Math.round(r * 0.095)) + 'px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(challenges[i].label, 0, 0);
+    ctx.restore();
+  }
+
+  ctx.beginPath();
+  ctx.arc(0, 0, r * 0.15, 0, Math.PI * 2);
+  ctx.fillStyle = '#0a0e1a';
+  ctx.fill();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = 'rgba(255,255,255,0.45)';
+  ctx.stroke();
+  ctx.restore();
+
+  ctx = prevCtx;
+}
+
 /* Blend between the previous and current environment palette. */
 function envColor(key) {
   const a = D.ENVS[world.envPrev][key], b = D.ENVS[world.envIndex][key];
@@ -52,6 +116,34 @@ function envColor(key) {
   return 'rgb(' + Math.round(a[0] + (b[0] - a[0]) * t) + ',' +
                   Math.round(a[1] + (b[1] - a[1]) * t) + ',' +
                   Math.round(a[2] + (b[2] - a[2]) * t) + ')';
+}
+
+/* ---------- Road curvature (rendering only) ----------
+   Converts a screen depth (y) into a lateral offset that traces the curve
+   engine.js is sampling ahead of the player. Zero at the player's own row
+   (y = view.H, "now"), growing as y decreases toward the top of the screen
+   ("ahead") - so everything drawn near the player sits exactly where the
+   lane-based collision math expects it, while the road bends visibly into
+   the distance. Every element (road, edges, dashes, scenery, traffic, coins,
+   player) samples the SAME function, so the whole scene bends as one piece;
+   nothing here ever touches stored entity x, so collision fairness is
+   completely unaffected. */
+const LOOKAHEAD_M_PER_PX = 0.085;
+function curveOffsetForY(y) {
+  const metresAhead = Math.max(0, view.H - y) * LOOKAHEAD_M_PER_PX;
+  return ED.engine.curveAt(metresAhead) - world.curveNow;
+}
+
+/* Reduced-visibility challenges (Sunset Strip glare, the Fog Warning wheel
+   effect) fade hazards in over their first `fadeDist` px of travel instead
+   of snapping fully visible - the harder of the two active sources wins.
+   Coins/power-ups are never faded (rewards, not threats). */
+function hazardAlpha(y) {
+  const envFade = ED.engine.envChallenge().fadeDist;
+  const fogFade = (world.wheelEffect && world.wheelEffect.id === 'fog') ? 240 : 0;
+  const fadeDist = Math.max(envFade, fogFade);
+  if (fadeDist <= 0) return 1;
+  return ED.util.clamp((y + fadeDist) / fadeDist, 0, 1);
 }
 
 function roundRect(x, y, w, h, r) {
@@ -278,7 +370,7 @@ function drawPowerupIcon(kind, x, y, r) {
 
 /* ---------- Roadside scenery ---------- */
 function drawProp(s) {
-  const x = s.side === 0 ? view.roadX * 0.5 : view.roadX + view.roadW + (view.W - view.roadX - view.roadW) * 0.5;
+  const x = (s.side === 0 ? view.roadX * 0.5 : view.roadX + view.roadW + (view.W - view.roadX - view.roadW) * 0.5) + curveOffsetForY(s.y);
   const env = D.ENVS[world.envIndex];
   const col = envColor('propCol');
   const r = 22 * s.s;
@@ -349,52 +441,89 @@ function render() {
 
   for (const s of world.props) drawProp(s);
 
-  // road with glowing neon edges
+  // Road body + edges: drawn as a bent path so the turn ahead is genuinely
+  // visible, not just implied. Sampled once per frame and reused for the
+  // fill and both edge strokes.
+  const roadYs = [];
+  for (let y = -20; y < view.H + 20; y += 26) roadYs.push(y);
+  roadYs.push(view.H + 20);
+  const roadOff = roadYs.map(curveOffsetForY);
+
   ctx.fillStyle = envColor('road');
-  ctx.fillRect(view.roadX, -20, view.roadW, view.H + 40);
+  ctx.beginPath();
+  for (let i = 0; i < roadYs.length; i++) {
+    const lx = view.roadX + roadOff[i];
+    if (i === 0) ctx.moveTo(lx, roadYs[i]); else ctx.lineTo(lx, roadYs[i]);
+  }
+  for (let i = roadYs.length - 1; i >= 0; i--) {
+    ctx.lineTo(view.roadX + view.roadW + roadOff[i], roadYs[i]);
+  }
+  ctx.closePath();
+  ctx.fill();
+
   const edge = envColor('edge');
   ctx.save();
   ctx.shadowColor = edge;
   ctx.shadowBlur = motion ? 12 : 0;
-  ctx.fillStyle = edge;
-  ctx.fillRect(view.roadX, -20, 4, view.H + 40);
-  ctx.fillRect(view.roadX + view.roadW - 4, -20, 4, view.H + 40);
+  ctx.strokeStyle = edge;
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  for (let i = 0; i < roadYs.length; i++) {
+    const lx = view.roadX + roadOff[i];
+    if (i === 0) ctx.moveTo(lx, roadYs[i]); else ctx.lineTo(lx, roadYs[i]);
+  }
+  ctx.stroke();
+  ctx.beginPath();
+  for (let i = 0; i < roadYs.length; i++) {
+    const rx = view.roadX + view.roadW + roadOff[i];
+    if (i === 0) ctx.moveTo(rx, roadYs[i]); else ctx.lineTo(rx, roadYs[i]);
+  }
+  ctx.stroke();
   ctx.restore();
 
   ctx.fillStyle = envColor('dash');
   const dashH = 42;
   for (let l = 1; l < D.LANES; l++) {
-    const lx = view.roadX + view.laneW * l - 3;
-    for (const sy of world.stripes) ctx.fillRect(lx, sy, 6, dashH);
+    for (const sy of world.stripes) {
+      const lx = view.roadX + view.laneW * l - 3 + curveOffsetForY(sy);
+      ctx.fillRect(lx, sy, 6, dashH);
+    }
   }
 
-  // oil slicks: dark puddle with an amber dashed warning ring
+  // oil/ice slicks: dark puddle (or pale icy patch) with a dashed warning
+  // ring. Environment/wheel visibility challenges (glare, fog) fade hazards
+  // in as they approach, shortening the reaction window.
   for (const s of world.slicks) {
+    const dx = curveOffsetForY(s.y);
+    const isIce = s.kind === 'ice';
     ctx.save();
-    ctx.translate(s.x, s.y);
+    ctx.globalAlpha = hazardAlpha(s.y);
+    ctx.translate(s.x + dx, s.y);
     ctx.scale(1.25, 0.8);
     ctx.beginPath();
     ctx.arc(0, 0, s.r, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(10, 12, 20, 0.85)';
+    ctx.fillStyle = isIce ? 'rgba(200, 230, 255, 0.6)' : 'rgba(10, 12, 20, 0.85)';
     ctx.fill();
     ctx.beginPath();
     ctx.arc(-s.r * 0.25, -s.r * 0.2, s.r * 0.35, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(120, 140, 200, 0.25)';
+    ctx.fillStyle = isIce ? 'rgba(255, 255, 255, 0.6)' : 'rgba(120, 140, 200, 0.25)';
     ctx.fill();
     ctx.setLineDash([6, 6]);
     ctx.lineWidth = 2;
-    ctx.strokeStyle = 'rgba(255, 183, 3, 0.55)';
+    ctx.strokeStyle = isIce ? 'rgba(150, 210, 255, 0.75)' : 'rgba(255, 183, 3, 0.55)';
     ctx.beginPath();
     ctx.arc(0, 0, s.r + 5, 0, Math.PI * 2);
     ctx.stroke();
     ctx.restore();
   }
+  ctx.globalAlpha = 1;
 
   // coins
   for (const c of world.coins) {
+    const dx = curveOffsetForY(c.y);
     const squeeze = Math.abs(Math.cos(c.spin));
     ctx.save();
-    ctx.translate(c.x, c.y);
+    ctx.translate(c.x + dx, c.y);
     ctx.scale(squeeze, 1);
     ctx.beginPath();
     ctx.arc(0, 0, c.r, 0, Math.PI * 2);
@@ -413,46 +542,55 @@ function render() {
 
   // power-ups
   for (const pu of world.powerups) {
+    const dx = curveOffsetForY(pu.y);
     const pr = pu.r + Math.sin(pu.pulse) * 2;
     ctx.save();
     ctx.shadowColor = PU_COLORS[pu.kind];
     ctx.shadowBlur = motion ? 14 : 0;
     ctx.beginPath();
-    ctx.arc(pu.x, pu.y, pr, 0, Math.PI * 2);
+    ctx.arc(pu.x + dx, pu.y, pr, 0, Math.PI * 2);
     ctx.fillStyle = 'rgba(10,14,26,0.9)';
     ctx.fill();
     ctx.lineWidth = 3;
     ctx.strokeStyle = PU_COLORS[pu.kind];
     ctx.stroke();
     ctx.shadowBlur = 0;
-    drawPowerupIcon(pu.kind, pu.x, pu.y, pr);
+    drawPowerupIcon(pu.kind, pu.x + dx, pu.y, pr);
     ctx.restore();
   }
 
-  // traffic
-  for (const o of world.obstacles) drawCar(o.x, o.y, o.w, o.h, o.color, 0, false, o);
+  // traffic - Ghost Traffic (wheel effect) reads as translucent, matching
+  // that it can't touch you while active
+  const ghostActive = world.wheelEffect && world.wheelEffect.id === 'ghost';
+  for (const o of world.obstacles) {
+    const dx = curveOffsetForY(o.y);
+    ctx.globalAlpha = hazardAlpha(o.y) * (ghostActive ? 0.4 : 1);
+    drawCar(o.x + dx, o.y, o.w, o.h, o.color, 0, false, o);
+  }
+  ctx.globalAlpha = 1;
 
   // player
   const hiddenStates = state === STATE.MENU || state === STATE.GARAGE || state === STATE.SETTINGS;
   if (!hiddenStates) {
     const car = ED.carById(ED.save.selected);
+    const pdx = curveOffsetForY(p.y);
     const blink = p.invuln > 0 && Math.floor(performance.now() / 120) % 2 === 0;
     if (!blink) {
       if (world.shieldOn) {
         ctx.save();
         ctx.beginPath();
-        ctx.arc(p.x, p.y + p.h / 2, p.h * 0.72, 0, Math.PI * 2);
+        ctx.arc(p.x + pdx, p.y + p.h / 2, p.h * 0.72, 0, Math.PI * 2);
         ctx.strokeStyle = 'rgba(79, 172, 254, 0.7)';
         ctx.lineWidth = 3;
         ctx.setLineDash([10, 8]);
         ctx.stroke();
         ctx.restore();
       }
-      drawCar(p.x, p.y, p.w, p.h, car.color, p.tilt, true, null, car.shape);
+      drawCar(p.x + pdx, p.y, p.w, p.h, car.color, p.tilt, true, null, car.shape);
     }
     if (world.magnetT > 0) {
       ctx.beginPath();
-      ctx.arc(p.x, p.y + p.h / 2, 130, 0, Math.PI * 2);
+      ctx.arc(p.x + pdx, p.y + p.h / 2, 130, 0, Math.PI * 2);
       ctx.strokeStyle = 'rgba(255, 209, 102, 0.25)';
       ctx.lineWidth = 2;
       ctx.stroke();
@@ -502,6 +640,29 @@ function render() {
   if (world.slowmoT > 0) {
     ctx.fillStyle = 'rgba(180, 101, 255, 0.07)';
     ctx.fillRect(0, 0, view.W, view.H);
+  }
+
+  // active wheel-challenge ambience: a soft edge glow in the challenge's
+  // color for constant peripheral feedback, plus a physical haze band while
+  // Fog Warning specifically is active.
+  if (world.wheelEffect) {
+    const activeChallenge = D.WHEEL_CHALLENGES.find(c => c.id === world.wheelEffect.id);
+    if (activeChallenge) {
+      ctx.save();
+      ctx.globalAlpha = 0.16;
+      const vg = ctx.createRadialGradient(
+        view.W / 2, view.H / 2, Math.min(view.W, view.H) * 0.35,
+        view.W / 2, view.H / 2, Math.max(view.W, view.H) * 0.7);
+      vg.addColorStop(0, 'rgba(0,0,0,0)');
+      vg.addColorStop(1, activeChallenge.color);
+      ctx.fillStyle = vg;
+      ctx.fillRect(0, 0, view.W, view.H);
+      ctx.restore();
+    }
+    if (world.wheelEffect.id === 'fog') {
+      ctx.fillStyle = 'rgba(180, 190, 210, 0.16)';
+      ctx.fillRect(0, 0, view.W, view.H * 0.42);
+    }
   }
 
   ctx.restore();

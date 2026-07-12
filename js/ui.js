@@ -11,12 +11,12 @@ const $ = id => document.getElementById(id);
 
 const menuOverlay = $('menuOverlay'), gameOverOverlay = $('gameOverOverlay'),
       pauseOverlay = $('pauseOverlay'), garageOverlay = $('garageOverlay'),
-      settingsOverlay = $('settingsOverlay'),
+      settingsOverlay = $('settingsOverlay'), wheelOverlay = $('wheelOverlay'),
       hud = $('hud'), pauseBtn = $('pauseBtn'), countdownEl = $('countdown'),
       distVal = $('distVal'), coinVal = $('coinVal'), speedVal = $('speedVal'),
-      srStatus = $('srStatus');
+      srStatus = $('srStatus'), wheelCanvas = $('wheelCanvas'), wheelResultEl = $('wheelResult');
 
-const ALL_OVERLAYS = [menuOverlay, gameOverOverlay, pauseOverlay, garageOverlay, settingsOverlay];
+const ALL_OVERLAYS = [menuOverlay, gameOverOverlay, pauseOverlay, garageOverlay, settingsOverlay, wheelOverlay];
 let staticDrawn = false;
 
 /* ---------- Accessibility: live announcements ---------- */
@@ -36,6 +36,7 @@ const STATE_ANNOUNCEMENTS = {
   [STATE.PAUSED]: 'Paused',
   [STATE.GARAGE]: 'Garage',
   [STATE.SETTINGS]: 'Settings',
+  [STATE.WHEEL]: 'Bonus challenge wheel spinning',
 };
 
 const ui = ED.ui = {
@@ -50,7 +51,7 @@ const ui = ED.ui = {
     const d = world.distance;
     distVal.textContent = d >= 1000 ? (d / 1000).toFixed(2) + ' km' : Math.floor(d) + ' m';
     coinVal.textContent = world.runCoins;
-    speedVal.textContent = Math.round((world.speed * engine.timeScale() / D.PX_PER_M) * 3.6);
+    speedVal.textContent = Math.round((world.speed * engine.timeScale() * engine.speedMult() / D.PX_PER_M) * 3.6);
   },
 };
 
@@ -147,6 +148,65 @@ function finishRun() {
   announce('Game over. Final score ' + finalScore + '. Distance ' + fmtDist(world.distance) + '.' + (isBest ? ' New best score!' : ''));
 }
 
+/* ---------- Spin-the-wheel random challenge ---------- */
+const WHEEL_SPIN_S = 2.6, WHEEL_HOLD_S = 1.3;
+let wheelChallenge = null, wheelPhase = 'spin', wheelSpinT = 0, wheelHoldT = 0, wheelFinalRotation = 0;
+
+function triggerWheel(forceId) {
+  const list = D.WHEEL_CHALLENGES;
+  const challenge = engine.pickWheelChallenge(forceId);
+  wheelChallenge = challenge;
+  const idx = list.indexOf(challenge);
+  const segDeg = 360 / list.length;
+  const targetCenterDeg = idx * segDeg + segDeg / 2;
+  const extraSpins = 4 + Math.floor(Math.random() * 3);
+  wheelFinalRotation = extraSpins * 360 + ((360 - targetCenterDeg) % 360);
+  wheelPhase = 'spin';
+  wheelSpinT = WHEEL_SPIN_S;
+  wheelHoldT = 0;
+  wheelResultEl.textContent = '';
+  wheelResultEl.classList.add('hidden');
+  pauseBtn.classList.remove('visible');
+  ui.setState(STATE.WHEEL);
+  showOverlay(wheelOverlay);
+  ED.render.drawWheel(wheelCanvas, 0, list);
+}
+ui.triggerWheel = triggerWheel;
+
+function tickWheel(dt) {
+  if (wheelPhase === 'spin') {
+    wheelSpinT -= dt;
+    const progress = ED.util.clamp(1 - wheelSpinT / WHEEL_SPIN_S, 0, 1);
+    const eased = 1 - Math.pow(1 - progress, 3); // ease-out cubic
+    ED.render.drawWheel(wheelCanvas, wheelFinalRotation * eased, D.WHEEL_CHALLENGES);
+    if (wheelSpinT <= 0) {
+      ED.render.drawWheel(wheelCanvas, wheelFinalRotation, D.WHEEL_CHALLENGES);
+      engine.applyWheelChallenge(wheelChallenge);
+      wheelResultEl.textContent = wheelChallenge.label + ' - ' + wheelChallenge.sub;
+      wheelResultEl.classList.remove('hidden');
+      announce(wheelChallenge.label + '. ' + wheelChallenge.sub);
+      ED.audio.sfx.power();
+      ED.audio.vibrate(25);
+      wheelPhase = 'result';
+      wheelHoldT = WHEEL_HOLD_S;
+    }
+  } else {
+    wheelHoldT -= dt;
+    if (wheelHoldT <= 0) finishWheel();
+  }
+}
+
+function finishWheel() {
+  hideAllOverlays();
+  pauseBtn.classList.add('visible');
+  world.wheelTimer = D.WHEEL_INTERVAL_S[0] + Math.random() * (D.WHEEL_INTERVAL_S[1] - D.WHEEL_INTERVAL_S[0]);
+  lastT = performance.now();
+  world.countdownT = 1;
+  countdownEl.textContent = '1';
+  countdownEl.classList.add('visible');
+  ui.setState(STATE.COUNTDOWN);
+}
+
 /* ---------- Main loop ---------- */
 const STATIC_STATES = new Set([STATE.MENU, STATE.PAUSED, STATE.GAMEOVER, STATE.GARAGE, STATE.SETTINGS]);
 let lastT = 0;
@@ -179,6 +239,12 @@ function loop(t) {
     engine.update(dt);
   } else if (engine.state === STATE.CRASHING) {
     if (engine.tickCrash(dt)) { finishRun(); return; }
+  } else if (engine.state === STATE.WHEEL) {
+    // World is frozen behind the overlay (drawn once, like other static
+    // screens); only the wheel's own small canvas keeps animating.
+    if (!staticDrawn) { ED.render.render(); staticDrawn = true; }
+    tickWheel(dt);
+    return;
   }
   ED.render.render();
 }
@@ -377,7 +443,7 @@ window.__ED = {
   get state() { return engine.state; },
   get score() { return engine.score(); },
   get distance() { return world.distance; },
-  get speedKmh() { return Math.round((world.speed * engine.timeScale() / D.PX_PER_M) * 3.6); },
+  get speedKmh() { return Math.round((world.speed * engine.timeScale() * engine.speedMult() / D.PX_PER_M) * 3.6); },
   openLanes() { return world.lastOpenLanes.slice(); },
   snapshot() {
     return {
@@ -388,6 +454,10 @@ window.__ED = {
   },
   steerTo(lane) { world.player.targetX = view.laneCenter(lane); },
   forceCrash() { if (engine.state === STATE.PLAYING) engine.beginCrash(null); },
+  forceWheel(id) { if (engine.state === STATE.PLAYING) triggerWheel(id); },
+  skipWheelSpin() { if (engine.state === STATE.WHEEL && wheelPhase === 'spin') wheelSpinT = 0; },
+  get wheelEffect() { return world.wheelEffect; },
+  get curveSlope() { return world.curveSlope; },
 };
 
 if ('serviceWorker' in navigator) {

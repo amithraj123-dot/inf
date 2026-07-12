@@ -6,7 +6,7 @@ const ED = window.ED;
 const D = ED.data;
 const clamp = ED.util.clamp;
 
-ED.STATE = { MENU: 0, COUNTDOWN: 1, PLAYING: 2, CRASHING: 3, PAUSED: 4, GAMEOVER: 5, GARAGE: 6, SETTINGS: 7 };
+ED.STATE = { MENU: 0, COUNTDOWN: 1, PLAYING: 2, CRASHING: 3, PAUSED: 4, GAMEOVER: 5, GARAGE: 6, SETTINGS: 7, WHEEL: 8 };
 
 /* Shared viewport / road geometry. Pixel sizes are written by render.resizeCanvas. */
 const view = ED.view = {
@@ -32,13 +32,19 @@ const world = ED.world = {
   crashTimer: 0, countdownT: 0,
   magnetT: 0, slowmoT: 0, shieldOn: false,
   announced: {}, newBestShown: false,
-  envIndex: 0, envPrev: 0, envBlend: 1,
+  envIndex: 0, envPrev: 0, envBlend: 1, envChallengeAnnounceT: -1,
+  curveSeed: 0, curveNow: 0, curveSlope: 0,
+  wheelTimer: 0, wheelResult: null, wheelEffect: null,
 };
 
 const engine = ED.engine = {
   state: ED.STATE.MENU,
   score: () => Math.floor(world.distance) + world.runCoins * 25 + world.nearMisses * 10,
   timeScale: () => (world.slowmoT > 0 ? 0.55 : 1),
+  // Speed Surge multiplier on effective scroll speed - deliberately separate
+  // from timeScale() (which governs simulation *time*, e.g. particle motion
+  // and row cadence): this only scales how fast the world moves.
+  speedMult: () => (world.wheelEffect && world.wheelEffect.id === 'speedsurge' ? 1.2 : 1),
 };
 
 function playerDims() {
@@ -79,9 +85,37 @@ engine.reset = function reset() {
   world.shakeT = 0;
   world.magnetT = 0; world.slowmoT = 0; world.shieldOn = false;
   world.announced = {}; world.newBestShown = false;
-  world.envIndex = 0; world.envPrev = 0; world.envBlend = 1;
+  world.envIndex = 0; world.envPrev = 0; world.envBlend = 1; world.envChallengeAnnounceT = -1;
+  world.curveSeed = Math.random() * 1000;
+  world.curveNow = 0; world.curveSlope = 0;
+  world.wheelTimer = D.WHEEL_FIRST_AT_S;
+  world.wheelResult = null; world.wheelEffect = null;
   ED.input.neutralGamma = ED.input.tiltX;
   initDecor();
+};
+
+/* ---------- Road curvature ----------
+   Two summed sine waves in metres-of-distance give a smooth, never-repeating
+   S-curve. Purely additive and continuous (no jumps), so it's safe to sample
+   at any distance for both "now" (player row) and "ahead" (render lookahead)
+   without ever affecting the lane-based collision system below. */
+function curveShapeAt(distanceM) {
+  const d = distanceM + world.curveSeed;
+  const a = Math.sin((2 * Math.PI * d) / D.CURVE_PERIOD_A_M);
+  const b = Math.sin((2 * Math.PI * d) / D.CURVE_PERIOD_B_M + 1.3);
+  return a * 0.7 + b * 0.3; // roughly [-1, 1]
+}
+
+engine.envChallenge = () => D.ENVS[world.envIndex].challenge;
+
+/* Curve offset (px) at a given lookahead distance ahead of the player's
+   current position. metresAhead = 0 is "now" (the player's row). Amplitude
+   is clamped to a fraction of the available roadside margin so the curve can
+   never push the road itself off the edge of a narrow phone screen. */
+engine.curveAt = function curveAt(metresAhead) {
+  const maxAmp = Math.max(10, view.roadX * 0.82);
+  const amp = Math.min(D.CURVE_BASE_AMP * engine.envChallenge().curveAmpMult, maxAmp);
+  return curveShapeAt(world.distance + metresAhead) * amp;
 };
 
 /* The eased x position of a lane-changing car for its current progress.
@@ -159,7 +193,7 @@ function spawnRow() {
   // Occasionally an oil-slick row instead of traffic (skims under you, causes a skid)
   if (hz.oil && Math.random() < 0.13) {
     const lane = Math.floor(Math.random() * D.LANES);
-    world.slicks.push({ lane, x: view.laneCenter(lane), y: -80, r: view.laneW * 0.34 });
+    world.slicks.push({ lane, x: view.laneCenter(lane), y: -80, r: view.laneW * 0.34, kind: 'oil' });
     announce('oil', 'OIL SLICKS AHEAD');
     world.lastOpenLanes = [0, 1, 2];
     world.lastRowLen = 0;
@@ -171,6 +205,14 @@ function spawnRow() {
   const { blocked, open } = pickRowLanes(nBlocks);
   world.lastOpenLanes = open;
   world.lastRowLen = 0;
+
+  // Snowfield-only black ice: layered into an open lane alongside normal
+  // traffic (never replaces the row), same skid behaviour as an oil slick.
+  const envCh = engine.envChallenge();
+  if (envCh.iceChance > 0 && Math.random() < envCh.iceChance) {
+    const iceLane = open[Math.floor(Math.random() * open.length)];
+    world.slicks.push({ lane: iceLane, x: view.laneCenter(iceLane), y: -140, r: view.laneW * 0.34, kind: 'ice' });
+  }
 
   for (const lane of blocked) {
     const isTruck = hz.trucks && Math.random() < 0.22;
@@ -228,6 +270,55 @@ function addParticles(x, y, color, n, force) {
   }
 }
 
+/* ---------- Spin-the-wheel challenges ---------- */
+engine.pickWheelChallenge = function pickWheelChallenge(forceId) {
+  const list = D.WHEEL_CHALLENGES;
+  if (forceId) return list.find(c => c.id === forceId) || list[0];
+  const total = list.reduce((sum, c) => sum + c.weight, 0);
+  let r = Math.random() * total;
+  for (const c of list) {
+    r -= c.weight;
+    if (r <= 0) return c;
+  }
+  return list[list.length - 1];
+};
+
+function spawnCoinStorm() {
+  for (let row = 0; row < 4; row++) {
+    for (let lane = 0; lane < D.LANES; lane++) {
+      world.coins.push({
+        lane, x: view.laneCenter(lane), y: -80 - row * 70,
+        r: Math.min(view.laneW * 0.16, 15), spin: Math.random() * Math.PI, vy: world.speed * 0.35,
+      });
+    }
+  }
+}
+
+/* Applies the chosen challenge's effect. Timed effects (coinrush/speedsurge/
+   ghost/fog) are tracked as a single world.wheelEffect - only one can be
+   active at a time, which is fine since the wheel itself won't retrigger
+   until the previous run of gameplay resumes. Instant effects (magnet reuses
+   the existing power-up timer, shield/coinstorm) apply immediately. */
+engine.applyWheelChallenge = function applyWheelChallenge(challenge) {
+  switch (challenge.id) {
+    case 'coinrush':
+    case 'speedsurge':
+    case 'ghost':
+    case 'fog':
+      world.wheelEffect = { id: challenge.id, timer: challenge.durSec };
+      break;
+    case 'magnet':
+      world.magnetT = Math.max(world.magnetT, challenge.durSec);
+      break;
+    case 'shield':
+      world.shieldOn = true;
+      break;
+    case 'coinstorm':
+      spawnCoinStorm();
+      break;
+  }
+};
+
 /* Runs during PLAYING *and* CRASHING so crash particles/shake always animate. */
 engine.updateEffects = function updateEffects(dt) {
   for (let i = world.particles.length - 1; i >= 0; i--) {
@@ -249,16 +340,40 @@ engine.update = function update(dt) {
   const input = ED.input;
   const car = ED.carById(ED.save.selected);
   const ts = engine.timeScale();
-  const eff = world.speed * ts; // effective world speed this frame
   const p = world.player;
   world.paceT += dt;
 
+  // Spin-the-wheel challenge: fires on its own timer, independent of
+  // distance, so it can't stack unfairly with a hazard milestone. Bails out
+  // of the rest of this frame's simulation - the world stays frozen while
+  // the wheel overlay is up (same pattern as pause/countdown).
+  world.wheelTimer -= dt;
+  if (world.wheelTimer <= 0) { ED.ui.triggerWheel(); return; }
+  if (world.wheelEffect) {
+    world.wheelEffect.timer -= dt;
+    if (world.wheelEffect.timer <= 0) world.wheelEffect = null;
+  }
+  const wheelId = world.wheelEffect && world.wheelEffect.id;
+
   // Speed: clean curve toward a real cap, scaled by the selected car's own
-  // top speed and acceleration. All cars share the same starting speed, so
-  // the traffic fairness math (which is speed-relative, not constant-tied)
-  // still holds regardless of which car is driven.
+  // top speed and acceleration. This underlying ramp stays smooth and
+  // monotonic at all times (including through a Speed Surge) so nothing
+  // whiplashes when a timed effect starts or ends - only the *effective*
+  // scroll speed (eff) gets a temporary multiplier, mirroring how slow-mo
+  // already works via timeScale(). All cars share the same starting speed,
+  // so the traffic fairness math (speed-relative, not constant-tied) still
+  // holds regardless of which car is driven or whether a surge is active.
   world.speed = Math.min(D.SPEED_CAP * car.topSpeed, D.BASE_SPEED + world.paceT * D.SPEED_RATE * car.accel);
+  const eff = world.speed * ts * engine.speedMult(); // effective world speed this frame
   world.distance += (eff * dt) / D.PX_PER_M;
+
+  // Road curvature: smooth, continuous, environment-flavoured (Pine Hills
+  // winds tighter). Sampled fresh each frame from world.distance, so it
+  // never needs remapping on resize the way stored entity positions do.
+  world.curveNow = engine.curveAt(0);
+  const rawSlope = engine.curveAt(1) - world.curveNow; // px per metre-ahead
+  const normSlope = clamp(rawSlope / 3, -1, 1);
+  world.curveSlope = normSlope;
 
   // Environment changes every ENV_EVERY_M metres
   const wantEnv = Math.floor(world.distance / D.ENV_EVERY_M) % D.ENVS.length;
@@ -267,6 +382,14 @@ engine.update = function update(dt) {
     world.envIndex = wantEnv;
     world.envBlend = 0;
     world.floatTexts.push({ text: D.ENVS[world.envIndex].name, t: 0, dur: 2.4, color: '#8ecae6', big: true });
+    world.envChallengeAnnounceT = 1.1; // stagger the challenge sub-text behind the env name
+  }
+  if (world.envChallengeAnnounceT > 0) {
+    world.envChallengeAnnounceT -= dt;
+    if (world.envChallengeAnnounceT <= 0) {
+      world.floatTexts.push({ text: engine.envChallenge().label, t: 0, dur: 2.2, color: '#ffd166' });
+      ED.ui.announce(engine.envChallenge().label);
+    }
   }
 
   // Distance milestones
@@ -286,6 +409,7 @@ engine.update = function update(dt) {
 
   // Steering
   const steerMult = car.steer;
+  const gripMult = engine.envChallenge().gripMult; // e.g. Snowfield ice
   if (!input.touching) {
     if (input.keys.ArrowLeft || input.keys.a || input.keys.A)  p.targetX -= 560 * steerMult * dt;
     if (input.keys.ArrowRight || input.keys.d || input.keys.D) p.targetX += 560 * steerMult * dt;
@@ -295,11 +419,14 @@ engine.update = function update(dt) {
       if (Math.abs(delta) > dead) p.targetX += (delta - Math.sign(delta) * dead) * 58 * steerMult * dt;
     }
   }
+  // A winding road pulls gently at the wheel like real cornering force -
+  // small, bounded, and easier to resist with better handling.
+  p.targetX += normSlope * D.CURVE_DRIFT * dt / steerMult;
   const minX = view.roadX + p.w / 2 + 6;
   const maxX = view.roadX + view.roadW - p.w / 2 - 6;
   p.targetX = clamp(p.targetX, minX, maxX);
   const prevX = p.x;
-  const grip = p.slip > 0 ? 3.5 : 14 * steerMult;
+  const grip = (p.slip > 0 ? 3.5 : 14 * steerMult) * gripMult;
   let tx = p.targetX;
   if (p.slip > 0) {
     tx += Math.sin(world.paceT * 22) * view.laneW * 0.16; // skid wobble
@@ -307,7 +434,9 @@ engine.update = function update(dt) {
   }
   p.x += (tx - p.x) * Math.min(1, grip * dt);
   p.x = clamp(p.x, minX, maxX);
-  p.tilt = clamp((p.x - prevX) * 0.045, -0.28, 0.28);
+  // Banking: steering-input tilt plus a softer lean into the curve ahead,
+  // giving cars a more realistic weighted, cornering feel.
+  p.tilt = clamp((p.x - prevX) * 0.045 + normSlope * 0.13, -0.34, 0.34);
   if (p.invuln > 0) p.invuln -= dt;
 
   // Timed power-ups
@@ -333,8 +462,13 @@ engine.update = function update(dt) {
   if (world.rowTimer <= 0) {
     spawnRow();
     const approach = world.speed * 0.65; // px/s the traffic closes on the player
+    // spacingFloor is the hard safety guarantee (untouched by any density
+    // modifier); cadenceMult (e.g. Midnight City rush hour) only tightens
+    // the "soft" difficulty terms, so an environment can never make the
+    // game unfair - only busier when there was slack to spare.
     const spacingFloor = (p.h + Math.max(world.lastRowLen, p.h) + 160) / approach;
-    const cadence = Math.max(0.72, 1.05 - world.distance / 12000, spacingFloor);
+    const cadenceMult = engine.envChallenge().cadenceMult;
+    const cadence = Math.max(0.72 * cadenceMult, (1.05 - world.distance / 12000) * cadenceMult, spacingFloor);
     world.rowTimer = cadence * (0.9 + Math.random() * 0.35);
   }
 
@@ -357,7 +491,7 @@ engine.update = function update(dt) {
 
     // Swept collision: sub-step the frame movement so high speed can't tunnel
     let hit = false;
-    if (p.invuln <= 0) {
+    if (p.invuln <= 0 && wheelId !== 'ghost') {
       const steps = Math.max(1, Math.ceil(dy / 14));
       for (let s2 = 1; s2 <= steps; s2++) {
         const oy = o.y + (dy * s2) / steps + o.h / 2;
@@ -400,7 +534,7 @@ engine.update = function update(dt) {
     const s = world.slicks[i];
     s.y += eff * dt;
     if (s.y > view.H + 60) { world.slicks.splice(i, 1); continue; }
-    if (p.slip <= 0 && !car.oilProof &&
+    if (p.slip <= 0 && !(car.oilProof && s.kind === 'oil') &&
         Math.abs(s.x - px) < s.r + pw * 0.4 && Math.abs(s.y - py) < s.r + ph * 0.4) {
       p.slip = 1.1;
       ED.audio.sfx.slip();
@@ -424,8 +558,8 @@ engine.update = function update(dt) {
     }
     if (d2 < Math.pow(c.r + pw / 2, 2)) {
       world.coins.splice(i, 1);
-      world.runCoins++;
-      addParticles(c.x, c.y, '#ffd166', 8, 160);
+      world.runCoins += wheelId === 'coinrush' ? 2 : 1;
+      addParticles(c.x, c.y, '#ffd166', wheelId === 'coinrush' ? 14 : 8, 160);
       ED.audio.sfx.coin();
       ED.audio.vibrate(15);
     }

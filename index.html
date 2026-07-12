@@ -66,6 +66,16 @@
   <button class="btn secondary" id="settingsBackBtn">BACK</button>
 </div>
 
+<div class="overlay hidden" id="wheelOverlay" aria-hidden="true">
+  <h2>BONUS CHALLENGE</h2>
+  <p class="kicker">Hold on...</p>
+  <div class="wheel-wrap">
+    <div class="wheel-pointer" aria-hidden="true"></div>
+    <canvas id="wheelCanvas" aria-hidden="true"></canvas>
+  </div>
+  <p class="wheel-result hidden" id="wheelResult"></p>
+</div>
+
 <div class="overlay hidden" id="pauseOverlay" aria-hidden="true">
   <h2>PAUSED</h2>
   <p class="kicker">Take a breath</p>
